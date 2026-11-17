@@ -1,0 +1,9 @@
+# MINING SIX SIGMA LAB - dependencias
+# Probado con Python 3.11 a 3.13
+streamlit>=1.49,<2.0   # necesita el parametro width= en dataframe y plotly_chart
+pandas>=2.1,<4.0   # probado con 3.0.5
+numpy>=1.26,<3.0
+scipy>=1.11,<2.0
+statsmodels>=0.14,<1.0
+plotly>=5.20
+pytest>=8.0
