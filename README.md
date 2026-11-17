@@ -59,7 +59,7 @@ La aplicación abre en `http://localhost:8501`.
 pytest -q
 ```
 
-Son 111 pruebas que contrastan los resultados contra tablas publicadas, contra SciPy y
+Son 215 pruebas que contrastan los resultados contra tablas publicadas, contra SciPy y
 statsmodels, y contra conjuntos de datos con parámetros conocidos.
 
 ---
@@ -82,10 +82,12 @@ components/
   interpretacion.py         Redacción de lecturas a partir de los valores calculados
   ui.py                     Componentes de interfaz reutilizables
 statistics_engine/          Motor de cálculo, sin dependencia de la interfaz
+  montecarlo.py             Propagación de incertidumbre, tornado y convergencia
   constants.py              d2, d3, c4 y factores A2, A3, B3, B4, D3, D4
   descriptive.py            Estadística descriptiva, percentiles, regla de Tukey
   capability.py             Cp, Cpk, Pp, Ppk, Cpm, Z, PPM, IC de Cpk
-  control_charts.py         Xbar-R, Xbar-S, I-MR, p, np, c, u y reglas de Nelson
+  control_charts.py         Xbar-R, Xbar-S, I-MR, p, np, c, u, EWMA, CUSUM,
+                            reglas de Nelson y límites congelados de Fase I
   inference.py              Pruebas t, ANOVA, Tukey, Levene, normalidad
   regression.py             Correlación, MCO, VIF, Breusch-Pagan, Durbin-Watson, Cook
   doe.py                    Factoriales 2^k, efectos, interacciones, ANOVA, Lenth
@@ -96,8 +98,9 @@ data/
   cases.py                  Registro de los cuatro casos con metadatos DMAIC
 utils/
   io.py                     Exportación a CSV y validación de archivos cargados
+  plantillas.py             Plantillas CSV descargables por familia de carta
   estado.py                 Estado compartido entre páginas
-tests/                      111 pruebas del motor estadístico
+tests/                      215 pruebas del motor estadístico
 assets/                     Recursos estáticos
 ```
 
@@ -151,13 +154,17 @@ principales, interacciones, ANOVA con error puro y método de Lenth para diseño
 réplicas · Gráficos de efectos principales, de interacción y Pareto de efectos ·
 Simulador paramétrico de escenarios operacionales · Comparación antes/después con
 prueba estadística · Matriz esfuerzo-impacto · Análisis costo-beneficio con VAN y
-período de recuperación
+período de recuperación · **Monte Carlo sobre el VAN**: distribuciones fija, normal,
+triangular, uniforme, lognormal y PERT, probabilidad de destruir valor, tornado de
+sensibilidad, curva de convergencia y comparación de alternativas por riesgo
 
-**Controlar** — Cartas Xbar-R, Xbar-S, I-MR, p, np, c y u, cada una con línea central,
-límites calculados, detección de puntos fuera de control y las ocho reglas de Nelson
-seleccionables · Formación de subgrupos racionales estratificados · Indicadores de
-seguimiento con desagregación por factor · Plan de control editable y exportable ·
-Criterios de reacción ante cada tipo de señal
+**Controlar** — **Fase I y Fase II con límites congelados** · **Exclusión de puntos con
+causa asignable** y recálculo · Cartas Xbar-R, Xbar-S, I-MR, p, np, c y u con línea
+central, límites calculados y las ocho reglas de Nelson seleccionables · **Cartas con
+memoria EWMA y CUSUM** para corrimientos pequeños y sostenidos · Eje temporal con fechas
+reales · Formación de subgrupos racionales estratificados · Indicadores de seguimiento
+con desagregación por factor · Plan de control editable que cita las líneas base
+congeladas · Criterios de reacción ante cada tipo de señal
 
 Cada herramienta presenta tres secciones didácticas (**¿Qué es?**, **¿Cómo funciona?**
 con fórmulas y procedimiento, **¿Cómo se interpreta?** aplicado al ejemplo minero), más
@@ -194,6 +201,17 @@ la interfaz muestra.
 8. **Las reglas de zona no aplican a cartas asimétricas.** En R, S, p, np, c y u solo
    se evalúan las reglas 1 a 4, y se advierte que activar las ocho reglas eleva la tasa
    de falsas alarmas.
+9. **Fase I y Fase II están separadas.** Los límites se estiman en un periodo base y se
+   congelan; la aplicación impide pasar a vigilancia sin una línea base y muestra cuántas
+   señales se ocultarían si se recalcularan los límites con los datos nuevos.
+10. **Excluir un punto exige causa identificada.** Los puntos excluidos se siguen
+    graficando, marcados, y la interpretación generada recuerda que excluir un punto
+    porque incomoda invalida el análisis.
+11. **Los límites congelados no son intercambiables.** Aplicar los de una carta a otra, o
+    a un tamaño de subgrupo distinto, se rechaza con un error explícito.
+12. **En EWMA y CUSUM no se aplican las reglas de rachas**, porque sus puntos están
+    autocorrelacionados por construcción; y en CUSUM se cuentan excursiones, no puntos
+    sobre el umbral.
 
 ---
 
@@ -213,11 +231,36 @@ la interfaz muestra.
 
 ---
 
+## ¿Sirve para un proceso real o solo para aprender?
+
+Para ambas cosas, pero conviene saber dónde está cada límite.
+
+**Lo que puede aplicar a su operación hoy.** Descargue la plantilla CSV que corresponda a
+su tipo de dato (están en la pestaña Controlar), reemplace las filas de ejemplo por sus
+registros y súbala. Con eso funcionan sobre sus datos: la estadística descriptiva, el
+análisis de capacidad, las cartas de variables con Fase I y Fase II, las cartas con
+memoria, las cartas de atributos, el Gage R&R, la correlación, la regresión, las pruebas
+de hipótesis y el ANOVA. Todos los resultados se exportan a CSV.
+
+**Lo que conviene hacer bien para que sirva.** Establezca una línea base en Fase I con
+20 a 25 subgrupos, investigue y explique cada señal antes de congelar los límites, y a
+partir de ahí trabaje en Fase II. Si recalcula los límites con cada lote nuevo, un
+proceso que se corre arrastra sus propios límites y el corrimiento queda oculto: la
+aplicación le muestra explícitamente cuántas señales se perderían si lo hiciera.
+
+**Lo que esta aplicación no es.** No tiene persistencia: al cerrar la pestaña se pierden
+las líneas base congeladas y el plan de control editado, así que exporte lo que quiera
+conservar. No se conecta a ningún sistema de planta ni actualiza nada en tiempo real.
+No reemplaza un sistema de información de proceso: es una herramienta de análisis y de
+aprendizaje con la que se puede trabajar sobre datos reales, no un historiador de datos.
+
 ## Limitaciones conocidas
 
-- El Gage R&R y las cartas de atributos usan conjuntos de datos propios, porque exigen
-  diseños (cruzado balanceado y conteos, respectivamente) que no existen en los datos
-  operacionales corrientes.
+- El Gage R&R y las cartas de atributos traen un ejemplo simulado propio, porque exigen
+  diseños (cruzado balanceado y conteos, respectivamente) que no existen en los datos de
+  proceso continuos. Con sus plantillas CSV sí operan sobre datos reales.
+- No hay persistencia entre sesiones: las líneas base congeladas viven en la sesión del
+  navegador. Expórtelas antes de cerrar.
 - El simulador paramétrico detallado está construido sobre el modelo del Caso 1. Los
   demás casos disponen de la comparación antes/después de su escenario de mejora.
 - El análisis de capacidad supone normalidad. Con datos sesgados, el PPM esperado puede
@@ -225,9 +268,9 @@ la interfaz muestra.
   observado, que es un conteo directo.
 - Los diseños 2^k solo detectan efectos lineales entre los dos niveles ensayados. No
   detectan curvatura.
-- El análisis costo-beneficio usa una sola trayectoria de flujos y no refleja la
-  incertidumbre de las estimaciones; un tratamiento completo requeriría simulación de
-  Monte Carlo sobre los parámetros inciertos.
+- El Monte Carlo del VAN supone independencia entre las entradas y un beneficio anual
+  constante dentro de cada simulación. Ambos supuestos SUBESTIMAN la dispersión real del
+  resultado, y la aplicación lo advierte en cada ejecución.
 
 ---
 
@@ -242,3 +285,8 @@ la interfaz muestra.
   *Technometrics*, 31(4).
 - Bissell, A. F. (1990). How reliable is your capability index?
   *Applied Statistics*, 39(3). Intervalo de confianza de Cpk.
+- Roberts, S. W. (1959). Control chart tests based on geometric moving averages.
+  *Technometrics*, 1(3). Carta EWMA.
+- Page, E. S. (1954). Continuous inspection schemes. *Biometrika*, 41(1). CUSUM.
+- Vose, D. (2008). *Risk Analysis: A Quantitative Guide*, 3.ª ed. Wiley.
+  Distribución PERT y análisis de sensibilidad en simulación de Monte Carlo.

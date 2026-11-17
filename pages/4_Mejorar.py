@@ -18,6 +18,7 @@ from statistics_engine.descriptive import describe
 from statistics_engine.doe import (factorial_analysis, interaction_plot_data,
                                    main_effect_plot_data)
 from statistics_engine.inference import two_sample_t
+from statistics_engine.montecarlo import Incierto, van_montecarlo
 from utils.estado import barra_lateral, datos_actuales
 from utils.io import a_csv
 
@@ -26,7 +27,7 @@ st.markdown(CSS, unsafe_allow_html=True)
 caso = barra_lateral()
 df = datos_actuales()
 
-cabecera("Disenar y evaluar las mejoras", "ETAPA 4 — MEJORAR",
+cabecera("Diseñar y evaluar las mejoras", "ETAPA 4 — MEJORAR",
          "El objetivo es generar y probar soluciones. El diseño de experimentos es la única "
          "herramienta de todo el recorrido que permite afirmaciones causales, porque manipula "
          "los factores en vez de observarlos. La simulación extiende esas conclusiones a "
@@ -404,9 +405,169 @@ with t_pri:
                        "primera prioridad.")
 
         st.markdown(nota(
-            "<b>Sobre las cifras económicas.</b> Los beneficios anuales se derivan de las "
-            "estimaciones de la simulación, que a su vez dependen del modelo del proceso. "
-            "Arrastran por tanto su incertidumbre y deberían presentarse como un rango, no como "
-            "una cifra puntual. El VAN con una sola trayectoria de flujos no refleja ese riesgo: "
-            "un análisis completo requeriría simulación de Monte Carlo sobre los parámetros "
-            "inciertos."), unsafe_allow_html=True)
+            "<b>El VAN de arriba es una cifra puntual y eso es engañoso.</b> Los beneficios "
+            "anuales se derivan de la simulación del proceso, la inversión es una estimación y "
+            "la tasa de descuento es una convención. Las tres son inciertas, y un VAN calculado "
+            "con un solo valor de cada una no dice nada sobre el riesgo de la decisión. "
+            "La sección siguiente propaga esa incertidumbre."), unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("#### Monte Carlo: el VAN como distribución, no como cifra")
+        ficha("montecarlo")
+
+        alt_sel = st.selectbox("Alternativa a evaluar", a["Alternativa"].tolist(), key="mc_alt")
+        fila = a[a["Alternativa"] == alt_sel].iloc[0]
+        inv0, ben0 = float(fila["Inversion"]), float(fila["Beneficio_anual"])
+
+        st.caption("Declare lo que sabe y lo que no de cada entrada. Con juicio experto, la "
+                   "triangular y la PERT (mínimo, más probable, máximo) suelen ser las formas "
+                   "más honestas: no exigen suponer simetría ni colas infinitas.")
+        cmc1, cmc2, cmc3 = st.columns(3)
+        with cmc1:
+            st.markdown("**Inversión**")
+            d_inv = st.selectbox("Distribución", ["pert", "triangular", "uniforme", "normal",
+                                                  "lognormal", "fija"], key="mc_dinv")
+            if d_inv in ("pert", "triangular"):
+                i_min = st.number_input("Mínimo", value=round(inv0 * 0.85), key="mc_imin")
+                i_mod = st.number_input("Más probable", value=round(inv0), key="mc_imod")
+                i_max = st.number_input("Máximo", value=round(inv0 * 1.45), key="mc_imax")
+                par_inv = {"minimo": i_min, "moda": i_mod, "maximo": i_max}
+            elif d_inv == "uniforme":
+                par_inv = {"minimo": st.number_input("Mínimo", value=round(inv0 * 0.85),
+                                                     key="mc_imin2"),
+                           "maximo": st.number_input("Máximo", value=round(inv0 * 1.45),
+                                                     key="mc_imax2")}
+            elif d_inv == "fija":
+                par_inv = {"valor": st.number_input("Valor", value=round(inv0), key="mc_ival")}
+            else:
+                par_inv = {"media": st.number_input("Media", value=round(inv0), key="mc_imed"),
+                           "sd": st.number_input("Desv. estándar", value=round(inv0 * 0.15),
+                                                 key="mc_isd")}
+        with cmc2:
+            st.markdown("**Beneficio anual**")
+            d_ben = st.selectbox("Distribución", ["triangular", "pert", "uniforme", "normal",
+                                                  "lognormal", "fija"], key="mc_dben")
+            if d_ben in ("pert", "triangular"):
+                b_min = st.number_input("Mínimo ", value=round(ben0 * 0.55), key="mc_bmin")
+                b_mod = st.number_input("Más probable ", value=round(ben0), key="mc_bmod")
+                b_max = st.number_input("Máximo ", value=round(ben0 * 1.25), key="mc_bmax")
+                par_ben = {"minimo": b_min, "moda": b_mod, "maximo": b_max}
+            elif d_ben == "uniforme":
+                par_ben = {"minimo": st.number_input("Mínimo ", value=round(ben0 * 0.55),
+                                                     key="mc_bmin2"),
+                           "maximo": st.number_input("Máximo ", value=round(ben0 * 1.25),
+                                                     key="mc_bmax2")}
+            elif d_ben == "fija":
+                par_ben = {"valor": st.number_input("Valor ", value=round(ben0), key="mc_bval")}
+            else:
+                par_ben = {"media": st.number_input("Media ", value=round(ben0), key="mc_bmed"),
+                           "sd": st.number_input("Desv. estándar ", value=round(ben0 * 0.25),
+                                                 key="mc_bsd")}
+        with cmc3:
+            st.markdown("**Tasa de descuento**")
+            d_tas = st.selectbox("Distribución", ["uniforme", "triangular", "fija"],
+                                 key="mc_dtas")
+            if d_tas == "uniforme":
+                par_tas = {"minimo": st.number_input("Mínima", value=max(tasa / 100 - 0.04, 0.0),
+                                                     format="%.4f", key="mc_tmin"),
+                           "maximo": st.number_input("Máxima", value=tasa / 100 + 0.04,
+                                                     format="%.4f", key="mc_tmax")}
+            elif d_tas == "triangular":
+                par_tas = {"minimo": st.number_input("Mínima", value=max(tasa / 100 - 0.04, 0.0),
+                                                     format="%.4f", key="mc_tmin2"),
+                           "moda": st.number_input("Más probable", value=tasa / 100,
+                                                   format="%.4f", key="mc_tmod"),
+                           "maximo": st.number_input("Máxima", value=tasa / 100 + 0.04,
+                                                     format="%.4f", key="mc_tmax2")}
+            else:
+                par_tas = {"valor": st.number_input("Valor", value=tasa / 100, format="%.4f",
+                                                    key="mc_tval")}
+            n_sim = st.select_slider("Simulaciones", [1_000, 5_000, 10_000, 50_000, 100_000],
+                                     value=10_000, key="mc_n")
+            semilla_mc = st.number_input("Semilla", 1, 999_999, 2024, key="mc_sem")
+
+        try:
+            inc_inv = Incierto("inversion", d_inv, par_inv, "USD", minimo_fisico=0.0)
+            inc_ben = Incierto("beneficio_anual", d_ben, par_ben, "USD/año")
+            inc_tas = Incierto("tasa", d_tas, par_tas)
+            rmc = van_montecarlo(inc_inv, inc_ben, inc_tas, horizonte,
+                                 n=int(n_sim), semilla=int(semilla_mc))
+            rr = rmc.resumen()
+            lo90, hi90 = rmc.intervalo(0.90)
+            p_neg = rmc.probabilidad_menor_que(0.0)
+            est = "bueno" if p_neg < 0.05 else "alerta" if p_neg < 0.25 else "critico"
+            st.markdown(fila_tiles([
+                tile("VAN esperado", num(rr["media"], 0), sub=f"mediana {num(rr['mediana'], 0)}"),
+                tile("Intervalo 90%", f"{num(lo90, 0)} a {num(hi90, 0)}",
+                     sub="percentiles 5 y 95"),
+                tile("P(VAN < 0)", num(100 * p_neg, 1), "%", sub="probabilidad de destruir valor",
+                     estado=est, etiqueta_estado={"bueno": "RIESGO BAJO",
+                                                  "alerta": "RIESGO APRECIABLE",
+                                                  "critico": "RIESGO ALTO"}[est]),
+                tile("Desviación estándar", num(rr["desv_std"], 0)),
+                tile("Error de muestreo", num(rmc.error_montecarlo(), 0),
+                     sub=f"sobre {int(n_sim):,} simulaciones".replace(",", " ")),
+            ]), unsafe_allow_html=True)
+
+            cg1, cg2 = st.columns([1.3, 1])
+            with cg1:
+                st.plotly_chart(g.distribucion_montecarlo(rmc, umbral=0.0,
+                                                          etiqueta_umbral="VAN = 0"),
+                                width="stretch")
+            with cg2:
+                st.plotly_chart(g.tornado(rmc.sensibilidad(), "el VAN"), width="stretch")
+            st.plotly_chart(g.convergencia_montecarlo(rmc.convergencia(), "el VAN"),
+                            width="stretch")
+
+            cd1, cd2 = st.columns(2)
+            with cd1:
+                tabla(rmc.tabla_resumen().round(4), f"{caso.id}_mc_resumen",
+                      "Resumen de la distribución", descargar=True)
+            with cd2:
+                tabla(rmc.sensibilidad().round(4), f"{caso.id}_mc_sensibilidad",
+                      "Contribución a la incertidumbre", descargar=True)
+            st.caption("Entradas declaradas: "
+                       + " · ".join(f"**{e.nombre}**: {e.descripcion()}"
+                                    for e in (inc_inv, inc_ben, inc_tas)))
+            interpretar("montecarlo", lambda: I.montecarlo(rmc, umbral=0.0,
+                                                           etiqueta_umbral="el punto de equilibrio"))
+
+            st.divider()
+            st.markdown("##### Comparación de alternativas con la misma incertidumbre relativa")
+            st.caption("Se aplican a cada alternativa las mismas formas de distribución y las "
+                       "mismas proporciones de incertidumbre definidas arriba, para que la "
+                       "comparación sea entre alternativas y no entre supuestos.")
+            comparables = {}
+            for row in a.head(3).itertuples():
+                i0, b0 = float(row.Inversion), float(row.Beneficio_anual)
+                comparables[row.Alternativa] = van_montecarlo(
+                    Incierto("inversion", "pert",
+                             {"minimo": i0 * 0.85, "moda": i0, "maximo": i0 * 1.45},
+                             minimo_fisico=0.0),
+                    Incierto("beneficio_anual", "triangular",
+                             {"minimo": b0 * 0.55, "moda": b0, "maximo": b0 * 1.25}),
+                    inc_tas, horizonte, n=int(min(n_sim, 20_000)), semilla=int(semilla_mc))
+            st.plotly_chart(g.comparar_van(comparables), width="stretch")
+            comp_mc = pd.DataFrame([
+                {"Alternativa": k,
+                 "VAN esperado": round(v.resumen()["media"], 0),
+                 "VAN mediana": round(v.resumen()["mediana"], 0),
+                 "P5": round(v.intervalo(0.90)[0], 0),
+                 "P95": round(v.intervalo(0.90)[1], 0),
+                 "P(VAN<0) %": round(100 * v.probabilidad_menor_que(0), 1)}
+                for k, v in comparables.items()])
+            tabla(comp_mc, f"{caso.id}_mc_comparacion", descargar=True)
+            mejor_media = comp_mc.loc[comp_mc["VAN esperado"].idxmax(), "Alternativa"]
+            menor_riesgo = comp_mc.loc[comp_mc["P(VAN<0) %"].idxmin(), "Alternativa"]
+            if mejor_media != menor_riesgo:
+                st.warning(
+                    f"**El mayor VAN esperado y el menor riesgo no coinciden.** Por valor "
+                    f"esperado conviene *{mejor_media}*; por probabilidad de destruir valor, "
+                    f"*{menor_riesgo}*. Esa discrepancia es precisamente lo que una cifra "
+                    "puntual ocultaba. La elección depende de cuánta pérdida es tolerable, "
+                    "que es una decisión de la organización y no del modelo.")
+            else:
+                st.success(f"**{mejor_media}** domina en ambos criterios: mayor VAN esperado y "
+                           "menor probabilidad de destruir valor.")
+        except ValueError as e:
+            st.error(f"No se pudo ejecutar la simulación: {e}")

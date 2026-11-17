@@ -145,7 +145,7 @@ _f("gage",
         "número de categorías distinguibles por el sistema de medición"),
    ],
    procedimiento=[
-       "Disenar un estudio CRUZADO: cada operador mide cada pieza, 2 o 3 veces.",
+       "Diseñar un estudio CRUZADO: cada operador mide cada pieza, 2 o 3 veces.",
        "Elegir 10 piezas que cubran el RANGO REAL del proceso, no piezas similares.",
        "Aleatorizar el orden y medir a ciegas respecto de los valores anteriores.",
        "Ejecutar el ANOVA y obtener los componentes de varianza.",
@@ -581,3 +581,146 @@ def obtener(clave: str) -> Ficha:
     if clave not in FICHAS:
         raise KeyError(f"Ficha desconocida: {clave}. Disponibles: {sorted(FICHAS)}")
     return FICHAS[clave]
+
+
+# ------------------------------------------- CONTROLAR: fases y memoria --
+_f("fases",
+   titulo="Fase I y Fase II: estudio base y vigilancia",
+   que_es="Las dos etapas en que se divide el trabajo con cartas de control. En la FASE I "
+          "se reúne un periodo base, se calculan límites provisionales, se investigan y "
+          "eliminan las causas especiales y se recalculan hasta obtener un periodo estable. "
+          "En la FASE II esos límites se CONGELAN y los datos nuevos se vigilan contra ellos. "
+          "Es la diferencia entre caracterizar un proceso y monitorearlo.",
+   como_funciona="En Fase I los límites son una estimación que se depura: cada punto con causa "
+                 "asignable identificada y corregida se excluye del cálculo (pero se sigue "
+                 "graficando) y los límites se recalculan sin él. Cuando ya no quedan señales "
+                 "inexplicadas, el periodo es la línea base. En Fase II no se recalcula nada: "
+                 "los parámetros guardados (Xbarbar y Rbar, o pbar, o cbar) generan los límites "
+                 "contra los que se comparan las observaciones nuevas.",
+   formulas=[
+       (r"\text{Fase I: } \bar{\bar{x}},\ \bar{R} \ \text{ estimados con los } k \text{ subgrupos base}",
+        "parámetros que quedan guardados"),
+       (r"\text{Fase II: } LC = \bar{\bar{x}},\quad LCS/LCI = \bar{\bar{x}} \pm A_2 \bar{R}",
+        "límites fijos; los datos nuevos no los modifican"),
+   ],
+   procedimiento=[
+       "Reunir un periodo base: la referencia habitual es de 20 a 25 subgrupos.",
+       "Calcular límites provisionales y revisar PRIMERO la carta de dispersión.",
+       "Investigar cada señal. Si se identifica una causa asignable y se corrige, excluir "
+       "ese subgrupo del cálculo y recalcular.",
+       "Si una señal no tiene causa identificable, NO excluirla: es parte del proceso.",
+       "Cuando el periodo base quede estable, congelar los límites.",
+       "Vigilar los datos nuevos contra esos límites, sin recalcularlos.",
+       "Recalcular solo ante un cambio deliberado y documentado del proceso.",
+   ],
+   como_se_interpreta="El efecto es grande y poco intuitivo. Si un proceso se corre 3 sigma y se "
+                      "recalculan los límites con los datos nuevos, la línea central se muda con "
+                      "el proceso, los límites se ensanchan y la carta no señala NADA: el "
+                      "corrimiento queda perfectamente oculto. Con los límites congelados, los "
+                      "mismos datos producen señal en todos los subgrupos. Recalcular es el error "
+                      "más frecuente y el más silencioso en el uso real del control estadístico.",
+   supuestos=["El periodo base es representativo de la operación normal del proceso.",
+              "Las causas asignables excluidas fueron efectivamente identificadas y corregidas; "
+              "excluir un punto solo porque incomoda invalida todo el análisis."],
+   limitaciones=["Con menos de 20 subgrupos base los límites tienen mucha incertidumbre y "
+                 "producen falsas alarmas en Fase II.",
+                 "Si el proceso cambia de forma legítima (nuevo equipo, nueva mezcla), los "
+                 "límites congelados dejan de aplicar y hay que rehacer la Fase I.",
+                 "Los límites de una carta no sirven para otra, ni para un tamaño de subgrupo "
+                 "distinto: los factores de carta dependen de n."])
+
+_f("memoria",
+   titulo="Cartas con memoria: EWMA y CUSUM",
+   que_es="Cartas diseñadas para detectar corrimientos PEQUEÑOS y sostenidos, del orden de "
+          "1 sigma, que la carta de Shewhart detecta muy tarde o no detecta. Shewhart solo mira "
+          "el punto actual; EWMA y CUSUM acumulan información de los puntos anteriores, y por "
+          "eso notan antes una deriva lenta.",
+   como_funciona="La EWMA promedia las observaciones dando más peso a las recientes y menos a "
+                 "las antiguas, con decaimiento geométrico. El CUSUM acumula las desviaciones "
+                 "respecto del objetivo descontando una holgura K, de modo que el ruido no se "
+                 "acumula pero un sesgo sistemático sí.",
+   formulas=[
+       (r"z_i = \lambda x_i + (1-\lambda) z_{i-1}, \qquad z_0 = \mu_0",
+        "EWMA; lambda entre 0.05 y 0.3. Menor lambda = más memoria"),
+       (r"LC_i = \mu_0 \pm L\,\sigma\sqrt{\frac{\lambda}{2-\lambda}\left[1-(1-\lambda)^{2i}\right]}",
+        "límites EWMA: se ensanchan al principio y luego convergen"),
+       (r"C^+_i = \max\left(0,\ x_i - (\mu_0 + K) + C^+_{i-1}\right)",
+        "CUSUM de lado superior; K = k·sigma es la holgura (k = 0.5 habitual)"),
+       (r"C^-_i = \max\left(0,\ (\mu_0 - K) - x_i + C^-_{i-1}\right)",
+        "CUSUM de lado inferior; se señala cuando C+ o C- superan H = h·sigma (h = 4 o 5)"),
+   ],
+   procedimiento=[
+       "Establecer mu0 y sigma en una Fase I limpia. Si se estiman con datos ya corridos, "
+       "ambas cartas quedan ciegas al corrimiento.",
+       "Elegir lambda (EWMA) o k y h (CUSUM) según el tamaño del corrimiento que importa "
+       "detectar: k = delta/2 está optimizado para un corrimiento de delta sigmas.",
+       "Graficar y vigilar el cruce de los límites.",
+       "En CUSUM, leer dónde la acumulación despegó de cero: ahí empezó el corrimiento.",
+   ],
+   como_se_interpreta="Ante un corrimiento de 1 sigma, y midiéndolo por simulación en esta misma "
+                      "aplicación: la carta de Shewhart lo detecta en cerca del 66% de los casos "
+                      "dentro de 60 observaciones, con una mediana de 17 observaciones de "
+                      "retraso; la EWMA y el CUSUM lo detectan siempre, con medianas de 9 y 7 "
+                      "observaciones. A cambio, Shewhart sigue siendo mejor ante un salto grande "
+                      "y aislado. Lo razonable es usarlas juntas.",
+   supuestos=["mu0 y sigma provienen de un periodo base estable.",
+              "Observaciones independientes. La autocorrelación afecta más a estas cartas que a "
+              "Shewhart, porque acumulan.",
+              "Aproximadamente normales, aunque ambas son razonablemente robustas."],
+   limitaciones=["Los puntos de ambas cartas están autocorrelacionados por construcción: NO se "
+                 "aplican las reglas de rachas, solo el cruce de límites.",
+                 "Reaccionan más lento que Shewhart ante un salto grande y aislado.",
+                 "El CUSUM sin reinicio deja varios puntos seguidos sobre el umbral tras una "
+                 "sola excursión: hay que contar excursiones, no puntos.",
+                 "No dicen cuál es la causa, solo que el nivel cambió."])
+
+_f("montecarlo",
+   titulo="Simulación de Monte Carlo y análisis de sensibilidad",
+   que_es="Método para propagar la incertidumbre de las entradas de un modelo hasta su "
+          "resultado. En vez de una cifra puntual, entrega una distribución: con ella se "
+          "responde qué tan probable es cada desenlace, que es lo que una decisión bajo riesgo "
+          "necesita saber.",
+   como_funciona="Cada entrada incierta se declara como una distribución. Se extrae una muestra "
+                 "aleatoria de cada una, se evalúa el modelo con esa combinación y se repite "
+                 "miles de veces. El conjunto de resultados aproxima la distribución de la "
+                 "salida. El análisis de sensibilidad correlaciona cada entrada con la salida "
+                 "para ver cuál incertidumbre domina.",
+   formulas=[
+       (r"Y = f(X_1, X_2, \dots, X_k), \qquad X_j \sim F_j",
+        "el modelo se evalúa n veces con muestras de cada distribución"),
+       (r"\hat{P}(Y > y_0) = \frac{1}{n}\sum_{i=1}^{n} \mathbb{1}[y_i > y_0]",
+        "probabilidad de superar un umbral: fracción de simulaciones que lo hacen"),
+       (r"EE(\bar{Y}) = \frac{s_Y}{\sqrt{n}}",
+        "error de muestreo: baja como 1/sqrt(n), no como 1/n"),
+       (r"\text{Contribución}_j = \frac{\rho_{s,j}^2}{\sum_m \rho_{s,m}^2} \times 100",
+        "tornado: cuadrado de la correlación de rangos, normalizado"),
+   ],
+   procedimiento=[
+       "Identificar qué entradas son inciertas y cuáles se conocen bien.",
+       "Elegir una distribución para cada una. Con juicio experto, la triangular o la PERT "
+       "(mínimo, más probable, máximo) suelen ser las más honestas.",
+       "Fijar una semilla para que el resultado sea reproducible.",
+       "Ejecutar y verificar la convergencia: si la media acumulada aún se mueve, subir n.",
+       "Leer la distribución completa, no solo la media: percentiles, intervalo y probabilidad "
+       "de cruzar el umbral que importa.",
+       "Revisar el tornado para saber dónde conviene invertir en reducir incertidumbre.",
+   ],
+   como_se_interpreta="Un VAN medio de 420.000 no dice nada sobre el riesgo. Si la simulación "
+                      "entrega un intervalo del 90% entre -80.000 y 910.000 con una probabilidad "
+                      "del 18% de VAN negativo, la decisión cambia por completo. El tornado "
+                      "indica además dónde actuar: si el beneficio anual explica el 86% de la "
+                      "incertidumbre del VAN, un estudio piloto que acote ese beneficio vale "
+                      "más que cualquier refinamiento del costo de inversión.",
+   supuestos=["Las distribuciones declaradas representan razonablemente lo que se sabe.",
+              "Las entradas son independientes salvo que se declare correlación.",
+              "El modelo determinístico es correcto; Monte Carlo propaga incertidumbre, "
+              "no corrige un modelo mal especificado."],
+   limitaciones=["No crea información: con distribuciones mal elegidas, el resultado está igual "
+                 "de mal pero con apariencia de rigor.",
+                 "Ignorar la correlación entre entradas SUBESTIMA la dispersión de la salida.",
+                 "Las colas del resultado dependen mucho de la forma supuesta para las entradas, "
+                 "que es justamente la parte peor conocida.",
+                 "El error de muestreo baja como 1/sqrt(n): cuadruplicar las simulaciones solo "
+                 "reduce el error a la mitad.",
+                 "El tornado mide la influencia de la INCERTIDUMBRE de cada entrada, no su "
+                 "importancia física: una variable decisiva pero bien conocida aparece abajo."])

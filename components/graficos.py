@@ -325,11 +325,18 @@ def pareto(tabla: pd.DataFrame, etiqueta_valor: str, corte: float = 80.0) -> go.
 
 
 # =========================================================== CONTROLAR
-def carta_control(res, titulo: str = "", mostrar_zonas: bool = True) -> go.Figure:
-    """Carta de control. Los puntos con señal se marcan con color Y simbolo,
-    nunca con color solo."""
+def carta_control(res, titulo: str = "", mostrar_zonas: bool = True,
+                  x=None, etiqueta_x: str = "Subgrupo / observación") -> go.Figure:
+    """Carta de control. Los puntos con señal se marcan con color Y símbolo,
+    nunca con color solo.
+
+    x : eje horizontal opcional (fechas o marcas de tiempo). Si no se entrega,
+        se usa el índice del subgrupo. Un eje temporal real permite relacionar
+        una señal con lo que ocurrió ese día en la operación, que es lo que
+        convierte la carta en una herramienta de investigación.
+    """
     n = len(res.puntos)
-    x = np.arange(1, n + 1)
+    x = np.arange(1, n + 1) if x is None else np.asarray(x)[:n]
     fuera = set(res.fuera_de_control)
     fig = go.Figure()
 
@@ -375,8 +382,17 @@ def carta_control(res, titulo: str = "", mostrar_zonas: bool = True) -> go.Figur
             customdata=[texto[i] for i in f],
             hovertemplate="Subgrupo %{x}<br>Valor %{y:.4f}<br><b>%{customdata}</b><extra></extra>"))
 
+    if getattr(res, "excluidos", None):
+        e = [i for i in res.excluidos if i < n]
+        if e:
+            fig.add_trace(go.Scatter(
+                x=x[e], y=np.asarray(res.puntos)[e], mode="markers",
+                name="Excluido del cálculo (causa conocida)",
+                marker=dict(color="rgba(0,0,0,0)", size=17, symbol="circle-open",
+                            line=dict(color=TINTA_MUTE, width=2.5)),
+                hovertemplate="%{x}<br>Excluido del cálculo de límites<extra></extra>"))
     fig.update_layout(title=titulo or res.nombre, height=ALTURA,
-                      xaxis_title="Subgrupo / observación", yaxis_title=res.etiqueta_y)
+                      xaxis_title=etiqueta_x, yaxis_title=res.etiqueta_y)
     return fig
 
 
@@ -460,4 +476,146 @@ def comparacion_escenarios(antes, despues, etiqueta_antes: str, etiqueta_despues
                       annotation_position="top", annotation_font=dict(size=11, color=color_serie(i)))
     fig.update_layout(title=titulo, height=ALTURA,
                       xaxis_title=unidad or "Valor", yaxis_title="Densidad estimada")
+    return fig
+
+
+# ============================================ CONTROLAR: cartas de memoria
+def carta_cusum(res, titulo: str = "", x=None,
+                etiqueta_x: str = "Observación") -> go.Figure:
+    """CUSUM de dos lados. C+ hacia arriba y C- reflejado hacia abajo, con el
+    umbral H a cada lado. Las señales se marcan con color Y símbolo."""
+    n = len(res.c_mas)
+    x = np.arange(1, n + 1) if x is None else np.asarray(x)[:n]
+    fig = go.Figure()
+    fig.add_hrect(y0=-res.H, y1=res.H, fillcolor="rgba(42,120,214,0.05)",
+                  line_width=0, layer="below")
+    _hline(fig, res.H, ESTADO["critico"], "H = +{:.3f}".format(res.H))
+    _hline(fig, -res.H, ESTADO["critico"], "H = -{:.3f}".format(res.H))
+    _hline(fig, 0, ESTADO["bueno"], "0", dash="solid", width=1.5)
+
+    fig.add_trace(go.Scatter(
+        x=x, y=res.c_mas, mode="lines+markers", name="C+ (corrimiento al alza)",
+        line=dict(color=SERIE[0], width=1.8),
+        marker=dict(color=SERIE[0], size=7, line=dict(color=SUPERFICIE, width=1.5)),
+        hovertemplate="Observación %{x}<br>C+ = %{y:.4f}<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=x, y=-res.c_menos, mode="lines+markers", name="C- (corrimiento a la baja)",
+        line=dict(color=SERIE[1], width=1.8),
+        marker=dict(color=SERIE[1], size=7, line=dict(color=SUPERFICIE, width=1.5)),
+        customdata=res.c_menos,
+        hovertemplate="Observación %{x}<br>C- = %{customdata:.4f}<extra></extra>"))
+
+    if res.senales_mas:
+        s = np.array(res.senales_mas)
+        fig.add_trace(go.Scatter(
+            x=x[s], y=res.c_mas[s], mode="markers", name="Señal al alza",
+            marker=dict(color=ESTADO["critico"], size=13, symbol="x-thin",
+                        line=dict(color=ESTADO["critico"], width=3)),
+            hovertemplate="Observación %{x}<br><b>C+ sobre H</b><extra></extra>"))
+    if res.senales_menos:
+        s = np.array(res.senales_menos)
+        fig.add_trace(go.Scatter(
+            x=x[s], y=-res.c_menos[s], mode="markers", name="Señal a la baja",
+            marker=dict(color=ESTADO["critico"], size=13, symbol="x-thin",
+                        line=dict(color=ESTADO["critico"], width=3)),
+            hovertemplate="Observación %{x}<br><b>C- sobre H</b><extra></extra>"))
+
+    fig.update_layout(title=titulo or "Carta CUSUM tabular de dos lados", height=ALTURA,
+                      xaxis_title=etiqueta_x, yaxis_title="Suma acumulada")
+    return fig
+
+
+# ================================================ MEJORAR: Monte Carlo ====
+def distribucion_montecarlo(res, umbral: float | None = None,
+                            etiqueta_umbral: str = "Umbral") -> go.Figure:
+    """Histograma de la salida con mediana, intervalo central y umbral de decisión."""
+    s = res.salida
+    r = res.resumen()
+    lo, hi = res.intervalo(0.90)
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=s, nbinsx=70, histnorm="probability density",
+        marker=dict(color=SERIE[0], line=dict(color=SUPERFICIE, width=1)),
+        opacity=0.85, name=f"{res.n:,} simulaciones".replace(",", " "),
+        hovertemplate="Intervalo: %{x}<br>Densidad: %{y:.3e}<extra></extra>"))
+    fig.add_vrect(x0=lo, x1=hi, fillcolor="rgba(42,120,214,0.08)", line_width=0, layer="below",
+                  annotation_text="IC 90%", annotation_position="top left",
+                  annotation_font=dict(size=11, color=TINTA_2))
+    _vline(fig, r["mediana"], TINTA_2, "Mediana", dash="solid")
+    _vline(fig, r["media"], SERIE[1], "Media", dash="dot")
+    if umbral is not None:
+        _vline(fig, umbral, ESTADO["critico"], etiqueta_umbral)
+    fig.update_layout(
+        title=f"Distribución de {res.nombre_salida} ({res.n:,} simulaciones)".replace(",", " "),
+        height=ALTURA, bargap=0.02,
+        xaxis_title=f"{res.nombre_salida} {res.unidad_salida}".strip(),
+        yaxis_title="Densidad")
+    return fig
+
+
+def tornado(sensibilidad: pd.DataFrame, nombre_salida: str = "la salida") -> go.Figure:
+    """Contribución de la incertidumbre de cada entrada. El signo va en el color
+    (polaridad) y además escrito en la etiqueta, nunca solo en el color."""
+    d = sensibilidad[~sensibilidad["fija"]].copy().sort_values("contribucion_pct")
+    if d.empty:
+        d = sensibilidad.copy()
+    colores = [SERIE[0] if r >= 0 else DIVERGENTE[6] for r in d["correlacion_spearman"]]
+    etiquetas = [f"{p:.1f}%  (r = {r:+.2f})"
+                 for p, r in zip(d["contribucion_pct"], d["correlacion_spearman"])]
+    fig = go.Figure(go.Bar(
+        x=d["contribucion_pct"], y=d["entrada"], orientation="h",
+        marker=dict(color=colores, line=dict(color=SUPERFICIE, width=2)),
+        text=etiquetas, textposition="outside", textfont=dict(size=11, color=TINTA_2),
+        customdata=d["correlacion_spearman"],
+        hovertemplate="%{y}<br>contribución %{x:.1f}%"
+                      "<br>correlación de rangos %{customdata:+.3f}<extra></extra>"))
+    fig.update_layout(
+        title=f"Contribución de cada entrada a la incertidumbre de {nombre_salida}",
+        height=max(300, 110 + 46 * len(d)), margin=dict(r=120),
+        xaxis_title="Contribución a la varianza de la salida (%)", yaxis_title="",
+        showlegend=False)
+    return fig
+
+
+def convergencia_montecarlo(conv: pd.DataFrame, nombre_salida: str = "la salida") -> go.Figure:
+    """Media acumulada con su banda de error: muestra si n ya es suficiente."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=np.r_[conv["n"], conv["n"][::-1]],
+        y=np.r_[conv["media_acumulada"] + 1.96 * conv["error_std"],
+                (conv["media_acumulada"] - 1.96 * conv["error_std"])[::-1]],
+        fill="toself", fillcolor="rgba(42,120,214,0.12)", line=dict(width=0),
+        name="IC 95% de la media", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(
+        x=conv["n"], y=conv["media_acumulada"], mode="lines",
+        line=dict(color=SERIE[0], width=2), name="Media acumulada",
+        hovertemplate="n=%{x}<br>media=%{y:.4f}<extra></extra>"))
+    fig.add_hline(y=conv["media_acumulada"].iloc[-1],
+                  line=dict(color=TINTA_MUTE, width=1.5, dash="dot"),
+                  annotation_text="Valor final", annotation_font=dict(size=11))
+    fig.update_layout(title=f"Convergencia de la media de {nombre_salida}", height=360,
+                      xaxis_title="Número de simulaciones", yaxis_title="Media acumulada")
+    return fig
+
+
+def comparar_van(resultados: dict, umbral: float = 0.0) -> go.Figure:
+    """Distribuciones de VAN de varias alternativas sobre un eje común.
+
+    Hasta tres alternativas se dibujan con la paleta categórica; el resto se
+    agrupa, porque más de tres densidades superpuestas dejan de ser legibles.
+    """
+    fig = go.Figure()
+    for i, (nombre, res) in enumerate(list(resultados.items())[:3]):
+        s = res.salida
+        k = stats.gaussian_kde(s)
+        xs = np.linspace(np.percentile(s, 0.5), np.percentile(s, 99.5), 300)
+        fig.add_trace(go.Scatter(
+            x=xs, y=k(xs), mode="lines", name=nombre[:40],
+            line=dict(color=color_serie(i), width=2), fill="tozeroy",
+            fillcolor=f"rgba({int(color_serie(i)[1:3],16)},{int(color_serie(i)[3:5],16)},"
+                      f"{int(color_serie(i)[5:7],16)},0.10)",
+            hovertemplate=f"{nombre[:40]}<br>%{{x:,.0f}}<extra></extra>"))
+    _vline(fig, umbral, ESTADO["critico"], "VAN = 0")
+    fig.update_layout(title="Distribución del VAN por alternativa", height=ALTURA,
+                      xaxis_title="VAN", yaxis_title="Densidad estimada")
     return fig

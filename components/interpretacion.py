@@ -208,7 +208,7 @@ def prueba(t, nombre_a: str = "grupo 1", nombre_b: str = "grupo 2", unidad: str 
         )
     d = t.detalles.get("d_cohen")
     if d is not None:
-        mag = ("despreciable" if abs(d) < 0.2 else "pequeno" if abs(d) < 0.5 else
+        mag = ("despreciable" if abs(d) < 0.2 else "pequeño" if abs(d) < 0.5 else
                "mediano" if abs(d) < 0.8 else "grande")
         out.append(f"Tamaño del efecto (d de Cohen) = **{_vt(d)}**, un efecto {mag} en la escala "
                    "convencional. A diferencia del p-valor, no depende del tamaño muestral.")
@@ -417,6 +417,15 @@ def carta(res, etiqueta: str = "") -> list[str]:
     if res.sigma:
         out.append(f"Desviación estándar del estadístico graficado: {_vt(res.sigma, 5)}. "
                    "Los límites están a 3 de esas desviaciones de la línea central.")
+    if getattr(res, "origen_limites", ""):
+        out.append(f"**Origen de los límites.** {res.origen_limites}")
+    if getattr(res, "excluidos", []):
+        out.append(
+            f"Se excluyeron del cálculo {len(res.excluidos)} punto(s) con causa asignable "
+            f"identificada (posiciones {', '.join(str(i+1) for i in res.excluidos)}). "
+            "Siguen graficados para dejar constancia, pero no contaminan los límites. "
+            "Excluir un punto solo es legítimo si la causa se identificó y se corrigió: "
+            "hacerlo porque el punto incomoda invalida el análisis.")
     if not fuera:
         out.append(
             "**No hay señales de causa especial**: ningun punto cae fuera de los límites y no se "
@@ -491,4 +500,143 @@ def comparacion(antes, despues, etiqueta: str, unidad: str = "",
     out.append("Esta comparación proviene de un **modelo de simulación**, no de una prueba en "
                "terreno: es una consecuencia lógica de los supuestos del modelo y debe validarse "
                "con un piloto antes de comprometer el beneficio.")
+    return out
+
+
+# ---------------------------------------------------------------- CUSUM --
+def cusum(res) -> list[str]:
+    n = len(res.c_mas)
+    out = [
+        f"**CUSUM tabular de dos lados** sobre {n} observaciones. Objetivo mu0 = "
+        f"{_vt(res.mu0, 4)}, sigma = {_vt(res.sigma, 4)}, holgura K = {_vt(res.K, 4)} "
+        f"({_vt(res.k_sigma, 2)} sigma) y umbral H = {_vt(res.H, 4)} "
+        f"({_vt(res.h_sigma, 2)} sigma).",
+        f"{res.origen_limites}",
+    ]
+    exc_mas, exc_menos = res.excursiones_mas, res.excursiones_menos
+    if not res.fuera_de_control:
+        out.append(
+            "**No hay señales**: la suma acumulada nunca superó el umbral en ninguno de los "
+            "dos lados. No hay evidencia de un corrimiento sostenido del nivel del proceso "
+            "respecto del objetivo."
+        )
+    else:
+        if exc_mas:
+            inicio = min(exc_mas) + 1
+            out.append(
+                f"**Corrimiento AL ALZA detectado.** {len(exc_mas)} excursión(es) sobre H; la "
+                f"primera señal aparece en la observación {inicio}. El proceso está operando "
+                f"por encima del objetivo de forma sostenida."
+            )
+        if exc_menos:
+            inicio = min(exc_menos) + 1
+            out.append(
+                f"**Corrimiento A LA BAJA detectado.** {len(exc_menos)} excursión(es) sobre H; "
+                f"la primera señal aparece en la observación {inicio}."
+            )
+        out.append(
+            f"Se contaron {len(res.excursiones)} excursión(es) distinta(s) y no "
+            f"{len(res.fuera_de_control)} puntos sueltos: sin reinicio, una sola excursión deja "
+            "varios puntos consecutivos por encima del umbral, de modo que contar puntos "
+            "sobreestima el número de eventos."
+        )
+        # Dónde empezó realmente: último punto en que la acumulación valía cero
+        import numpy as _np
+        lado = res.c_mas if exc_mas else res.c_menos
+        primera = (min(exc_mas) if exc_mas else min(exc_menos))
+        ceros = _np.where(lado[:primera + 1] == 0)[0]
+        if ceros.size:
+            out.append(
+                f"La acumulación despegó de cero en la observación {int(ceros[-1]) + 2}: ese es "
+                "el punto donde el corrimiento probablemente comenzó, varias observaciones antes "
+                "de que la carta lo señalara. Esa estimación del inicio es la ventaja práctica "
+                "del CUSUM frente a Shewhart."
+            )
+    for nt in res.notas:
+        out.append(f"*{nt}*")
+    return out
+
+
+# ---------------------------------------------------------- Monte Carlo --
+def montecarlo(res, umbral: float | None = None, etiqueta_umbral: str = "el umbral",
+               mayor_es_mejor: bool = True) -> list[str]:
+    r = res.resumen()
+    lo, hi = res.intervalo(0.90)
+    u = f" {res.unidad_salida}" if res.unidad_salida else ""
+    n_txt = f"{res.n:,}".replace(",", " ")
+    out = [
+        f"**{n_txt} simulaciones** de *{res.nombre_salida}* (semilla {res.semilla}). "
+        f"Media {_vt(r['media'], 2)}{u}, mediana {_vt(r['mediana'], 2)}{u}, desviación "
+        f"estándar {_vt(r['desv_std'], 2)}{u}.",
+        f"El 90% de los resultados cae entre **{_vt(lo, 2)}** y **{_vt(hi, 2)}**{u} "
+        f"(percentiles 5 y 95). El rango completo simulado va de {_vt(r['minimo'], 2)} a "
+        f"{_vt(r['maximo'], 2)}{u}.",
+    ]
+    sesgo = r["media"] - r["mediana"]
+    if r["desv_std"] > 0 and abs(sesgo) / r["desv_std"] > 0.1:
+        lado = "derecha" if sesgo > 0 else "izquierda"
+        out.append(
+            f"La media supera a la mediana en {_vt(sesgo, 2)}{u}" if sesgo > 0 else
+            f"La mediana supera a la media en {_vt(-sesgo, 2)}{u}"
+        )
+        out[-1] += (f": la distribución es asimétrica hacia la {lado}. Con distribuciones "
+                    "asimétricas la media no es el valor típico; para decidir conviene mirar "
+                    "la mediana y los percentiles.")
+    if umbral is not None:
+        p_sup = res.probabilidad_mayor_que(umbral)
+        p_inf = 1 - p_sup
+        favorable, adverso = (p_sup, p_inf) if mayor_es_mejor else (p_inf, p_sup)
+        out.append(
+            f"**Probabilidad de superar {etiqueta_umbral} ({_vt(umbral, 2)}{u}): "
+            f"{p_sup:.1%}.** Probabilidad de quedar por debajo: {p_inf:.1%}."
+        )
+        if adverso < 0.05:
+            out.append(f"El resultado adverso tiene una probabilidad de {adverso:.1%}: la "
+                       "decisión es robusta frente a la incertidumbre declarada.")
+        elif adverso < 0.25:
+            out.append(f"El resultado adverso tiene una probabilidad de {adverso:.1%}: hay "
+                       "riesgo apreciable. Conviene dimensionar qué pérdida implicaría y si "
+                       "es tolerable, no solo mirar el valor esperado.")
+        else:
+            out.append(f"El resultado adverso tiene una probabilidad de {adverso:.1%}: **el "
+                       "valor esperado favorable esconde un riesgo alto.** Decidir solo por la "
+                       "media sería un error; considere reducir la incertidumbre antes de "
+                       "comprometerse, o diseñar la alternativa para limitar la pérdida.")
+
+    err = res.error_montecarlo()
+    rel = 100 * err / abs(r["media"]) if r["media"] else float("nan")
+    out.append(
+        f"Error de muestreo de la media: {_vt(err, 3)}{u}"
+        + (f" ({_vt(rel, 2)}% de la media)" if rel == rel else "")
+        + f". Baja como 1/raíz(n), así que cuadruplicar las {n_txt} simulaciones solo lo "
+          "reduciría a la mitad."
+    )
+
+    s = res.sensibilidad()
+    activas = s[~s["fija"]]
+    if not activas.empty:
+        dom = activas.iloc[0]
+        out.append(
+            f"**Dónde está la incertidumbre.** *{dom['entrada']}* explica el "
+            f"{_vt(dom['contribucion_pct'], 1)}% de la varianza del resultado "
+            f"(correlación de rangos {_vt(dom['correlacion_spearman'], 3)}). "
+            "Reducir la incertidumbre de esa entrada, con un piloto o una medición mejor, "
+            "es lo que más estrecharía la distribución del resultado."
+        )
+        resto = activas.iloc[1:]
+        if not resto.empty:
+            detalle = "; ".join(f"*{row.entrada}* {row.contribucion_pct:.1f}%"
+                                for row in resto.itertuples())
+            out.append(f"Las demás entradas contribuyen: {detalle}.")
+    fijas = s[s["fija"]]["entrada"].tolist()
+    if fijas:
+        out.append(f"Declaradas sin incertidumbre y por tanto fuera del tornado: "
+                   f"{', '.join(fijas)}. Si alguna de ellas en realidad varía, esta "
+                   "simulación subestima la dispersión del resultado.")
+    out.append(
+        "Recordatorio: Monte Carlo propaga la incertidumbre que usted declaró, no la que "
+        "existe. Si las distribuciones de entrada están mal elegidas, estos números están "
+        "igual de mal, solo que con apariencia de rigor. Además se supone independencia "
+        "entre las entradas: si en realidad se mueven juntas, la dispersión real es mayor."
+    )
     return out

@@ -364,7 +364,7 @@ def subgrupos_desde_serie(serie, n: int = 5) -> np.ndarray:
 
 
 def subgrupos_racionales(df: pd.DataFrame, variable: str, por: str | None = None,
-                         n: int = 5) -> tuple[np.ndarray, str]:
+                         n: int = 5, devolver_indices: bool = False):
     """Forma subgrupos racionales, opcionalmente homogéneos dentro de un factor.
 
     Un subgrupo es RACIONAL cuando sus observaciones se tomaron bajo condiciones
@@ -379,19 +379,40 @@ def subgrupos_racionales(df: pd.DataFrame, variable: str, por: str | None = None
                 uno. Entonces la diferencia entre turnos aparece como variación
                 entre subgrupos, que es lo que la carta de medias debe detectar.
 
-    Devuelve la matriz (k x n) y una descripción del criterio usado.
+    devolver_indices : si es True, devuelve además una matriz con las posiciones
+                de fila originales de cada observación, necesaria para poner un
+                eje temporal o para rastrear una señal hasta el registro que la
+                produjo.
+
+    Devuelve (matriz, descripción) o (matriz, descripción, índices).
     """
+    serie = df[variable]
+    validos = serie.dropna().index.to_numpy()
     if por is None:
-        return subgrupos_desde_serie(df[variable], n), (
-            f"{n} observaciones consecutivas por subgrupo, sin estratificar")
-    bloques = []
-    for _, g in df.groupby(por, observed=True, sort=True):
-        x = g[variable].dropna().to_numpy(dtype=float)
+        x = serie.loc[validos].to_numpy(dtype=float)
+        k = x.size // n
+        if k < 2:
+            raise ValueError(
+                f"Datos insuficientes para formar 2 subgrupos de tamaño {n}.")
+        m = x[: k * n].reshape(k, n)
+        idx = df.index.get_indexer(validos[: k * n]).reshape(k, n)
+        desc = f"{n} observaciones consecutivas por subgrupo, sin estratificar"
+        return (m, desc, idx) if devolver_indices else (m, desc)
+
+    bloques, bloques_idx = [], []
+    for _, g in df.loc[validos].groupby(por, observed=True, sort=True):
+        pos = g.index.to_numpy()
+        x = g[variable].to_numpy(dtype=float)
         k = x.size // n
         if k >= 1:
             bloques.append(x[: k * n].reshape(k, n))
+            bloques_idx.append(df.index.get_indexer(pos[: k * n]).reshape(k, n))
     if not bloques or sum(b.shape[0] for b in bloques) < 2:
         raise ValueError(
             f"Datos insuficientes para formar al menos 2 subgrupos de tamaño {n} "
             f"dentro de los niveles de '{por}'.")
-    return np.vstack(bloques), f"{n} observaciones por subgrupo, homogéneas dentro de '{por}'"
+    m = np.vstack(bloques)
+    desc = f"{n} observaciones por subgrupo, homogéneas dentro de '{por}'"
+    if devolver_indices:
+        return m, desc, np.vstack(bloques_idx)
+    return m, desc

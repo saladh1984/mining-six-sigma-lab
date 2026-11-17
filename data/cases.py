@@ -106,7 +106,7 @@ CASO_1 = Caso(
     alcance_inicio="Posicionamiento del camion bajo la pala para iniciar el carguio.",
     alcance_fin="Retorno del camion al punto de encolamiento de la pala.",
     fuera_de_alcance=(
-        "Mantenimiento mayor de la flota, disenio del rajo, secuenciamiento de fases y "
+        "Mantenimiento mayor de la flota, diseño del rajo, secuenciamiento de fases y "
         "operación aguas abajo del chancador primario."
     ),
     impacto=(

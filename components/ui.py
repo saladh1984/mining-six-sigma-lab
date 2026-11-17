@@ -64,7 +64,12 @@ def interpretar(clave: str, generador: Callable[[], list[str]],
 # solo al mostrar y exportar: las claves de los datos no cambian, de modo que
 # ningún análisis depende de esta traducción.
 ETIQUETAS = {
-    "senal": "señal", "categoria": "categoría", "minimo": "mínimo", "maximo": "máximo",
+    "senal": "señal", "senal_superior": "señal superior",
+    "senal_inferior": "señal inferior", "C_mas": "C+", "C_menos": "C−",
+    "observacion": "observación", "excluido": "excluido",
+    "media_acumulada": "media acumulada", "contribucion_pct": "contribución (%)",
+    "correlacion_spearman": "correlación de Spearman", "entrada": "entrada",
+    "fija": "sin incertidumbre", "categoria": "categoría", "minimo": "mínimo", "maximo": "máximo",
     "mediana": "mediana", "desv_std": "desv. estándar", "coef_variacion": "coef. de variación",
     "error_std_media": "error estándar de la media", "asimetria": "asimetría",
     "curtosis_exceso": "curtosis en exceso", "moda_metodo": "método de la moda",
